@@ -1,0 +1,32 @@
+name: tiny_treasury
+description: Tiny Treasury - a pocket-money fund manager that teaches kids to save.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.3.2
+  flutter_svg: ^2.0.10
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+  fonts:
+    - family: Fredoka
+      fonts:
+        - asset: assets/fonts/Fredoka-SemiBold.ttf
+          weight: 600
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito-SemiBold.ttf
+          weight: 600
