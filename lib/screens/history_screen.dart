@@ -6,6 +6,7 @@ import '../state/scope.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
 import '../widgets/icons.dart';
+import 'kid_bar.dart';
 import 'sheets.dart';
 
 enum _Filter { all, expenses, deposits }
@@ -48,20 +49,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(TT.gutter, 16, TT.gutter, 120),
         children: [
+          const KidTopBar(),
+          const SizedBox(height: 20),
+          KidFade(
+            kidId: kid.id,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(
             children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('History', style: TT.display(26)),
-                  if (state.kids.length > 1) Text(kid.name, style: TT.body(13, color: TT.muted)),
-                ]),
-              ),
+              Expanded(child: Text('History', style: TT.display(26))),
               GestureDetector(
                 onTap: () async {
                   final months = state.activeMonths(kid);
                   final picked = await showChoiceSheet<DateTime>(
                     context,
-                    title: 'Pick a month',
+                    title: 'Which month?',
                     value: _month,
                     options: [for (final m in months) (m, monthYear(m), null)],
                   );
@@ -111,14 +112,36 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
           ]),
           const SizedBox(height: 22),
+          AnimatedSwitcher(
+            duration: Motion.medium,
+            switchInCurve: Motion.curve,
+            layoutBuilder: (current, previous) => Stack(
+              alignment: Alignment.topCenter,
+              children: [...previous, if (current != null) current],
+            ),
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: SlideTransition(
+                position: Tween<Offset>(begin: const Offset(0, 0.03), end: Offset.zero).animate(anim),
+                child: child,
+              ),
+            ),
+            child: Column(
+              key: ValueKey('${_filter.name}-${_month.year}-${_month.month}'),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
           if (groups.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 40),
               child: Column(children: [
-                Text('Nothing here yet', style: TT.display(18)),
+                Text('No coins moved yet', style: TT.display(18)),
                 const SizedBox(height: 6),
                 Text(
-                  'Expenses and money added this month will show up here.',
+                  _filter == _Filter.deposits
+                      ? 'Money coming in will pop up here.'
+                      : _filter == _Filter.expenses
+                          ? 'Spends will pop up here. Saving is fun too!'
+                          : 'Spends and money coming in will pop up here.',
                   textAlign: TextAlign.center,
                   style: TT.body(13, color: TT.muted),
                 ),
@@ -139,6 +162,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
             const SizedBox(height: 16),
           ],
+              ],
+            ),
+          ),
+            ]),
+          ),
         ],
       ),
     );

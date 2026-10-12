@@ -41,9 +41,9 @@ class NotificationsScreen extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 80),
                 child: Column(children: [
-                  Text('All caught up', style: TT.display(18)),
+                  Text('All caught up!', style: TT.display(18)),
                   const SizedBox(height: 6),
-                  Text('Pocket-money days, interest and jar news will show up here.',
+                  Text('Pocket money, saving bonuses and jar news will pop up here.',
                       textAlign: TextAlign.center, style: TT.body(13, color: TT.muted)),
                 ]),
               ),

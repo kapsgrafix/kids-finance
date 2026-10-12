@@ -9,12 +9,40 @@ const _weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
 
 DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
-/// The pocket-money day after [d].
-DateTime nextCycle(DateTime d, Frequency f) =>
-    f == Frequency.monthly ? DateTime(d.year, d.month + 1, 1) : dateOnly(d).add(const Duration(days: 7));
+/// The pocket-money day after [d] (which is itself a pocket-money day).
+DateTime nextCycle(DateTime d, Frequency f, int payDay) => f == Frequency.monthly
+    ? DateTime(d.year, d.month + 1, payDay.clamp(1, 28).toInt())
+    : dateOnly(d).add(const Duration(days: 7));
 
-/// First pocket-money day after a kid is set up (or after the frequency changes).
-DateTime firstPayDateAfter(DateTime today, Frequency f) => nextCycle(dateOnly(today), f);
+/// First pocket-money day strictly after [now]'s date.
+DateTime firstPayDateAfter(DateTime now, Frequency f, int payDay) {
+  final today = dateOnly(now);
+  if (f == Frequency.monthly) {
+    final day = payDay.clamp(1, 28).toInt();
+    final thisMonth = DateTime(today.year, today.month, day);
+    return thisMonth.isAfter(today) ? thisMonth : DateTime(today.year, today.month + 1, day);
+  }
+  var ahead = (payDay - today.weekday) % 7;
+  if (ahead == 0) ahead = 7;
+  return today.add(Duration(days: ahead));
+}
+
+String ordinal(int n) {
+  if (n >= 11 && n <= 13) return '${n}th';
+  return switch (n % 10) { 1 => '${n}st', 2 => '${n}nd', 3 => '${n}rd', _ => '${n}th' };
+}
+
+String clock(int hour, int minute) => timeOfDay(DateTime(2000, 1, 1, hour, minute));
+
+String weekdayOf(int weekday) => _weekdays[(weekday - 1) % 7];
+
+/// "1st of every month · 6:00 PM" / "Every Saturday · 6:00 PM"
+String scheduleLabel(Frequency f, int payDay, int hour, int minute, {bool short = false}) {
+  final day = f == Frequency.monthly
+      ? (short ? '${ordinal(payDay)} of month' : '${ordinal(payDay)} of every month')
+      : (short ? '${weekdayOf(payDay)}s' : 'Every ${weekdayOf(payDay)}');
+  return '$day · ${clock(hour, minute)}';
+}
 
 int cyclesForMonths(int months, Frequency f) => f == Frequency.monthly ? months : months * 4;
 

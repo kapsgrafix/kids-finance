@@ -13,6 +13,7 @@ cd tiny_treasury
 flutter create . --project-name tiny_treasury --org com.binnytechlabs --platforms android,ios
 rm -f test/widget_test.dart      # the template test references a counter app that doesn't exist here
 flutter pub get
+dart run flutter_launcher_icons  # app icon from assets/icon/
 flutter run
 ```
 
@@ -56,9 +57,22 @@ All logic is in `lib/state/app_state.dart`.
 - **Jars**: the slider sets 2–10% of pocket money per cycle, and the plan is 3, 6 or 12 months (×4 cycles when
   weekly). Bonus rates (default 4% / 8% / 12%) are set in Settings. When the last contribution lands, the jar pays
   out its savings plus the bonus. "Settle the amount and cancel" returns what was saved, without the bonus.
-- One active jar per kid in phase 1.
+- A kid can have several jars, but all their jars together can take at most 10% of pocket money.
+  Home: one jar opens its details straight away; two or more open the jar list.
+- **Money chat (review) day and time** are set per kid in Settings → Review together: a day of the month (1–28)
+  or a weekday, plus a time. Pocket money lands at that moment.
+- The selected kid is shared by every tab; removing a profile deletes that kid's history and jars.
 
 ## Fonts
 
 Fredoka and Nunito (SIL Open Font License, licence files in `assets/fonts/`) are bundled as static SemiBold
 instances, so the app works offline. Fredoka has no ₹ glyph, so headings fall back to Nunito for it.
+
+## Build an APK on GitHub
+
+`.github/workflows/build-apk.yml` builds a release APK on every push to `main`, and you can also start it by hand
+from the Actions tab ("Build APK" → "Run workflow"). If the `android/` folder isn't committed, the workflow
+generates it first. Download the APK from the run's **Artifacts** section (`tiny-treasury-apk`).
+
+The release APK is signed with Flutter's default debug key, which is fine for sideloading onto phones. Publishing
+on the Play Store needs your own upload keystore.

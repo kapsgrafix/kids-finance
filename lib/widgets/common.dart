@@ -6,6 +6,73 @@ import '../state/app_state.dart';
 import '../theme/tokens.dart';
 import 'icons.dart';
 
+// ------------------------------------------------------------------ motion helpers
+
+/// Gives anything a soft "squish" while a finger is down, so taps never feel abrupt.
+/// Uses a Listener, so it works alongside InkWell / GestureDetector children.
+class Pressable extends StatefulWidget {
+  final Widget child;
+  final bool enabled;
+  final double scale;
+  const Pressable({super.key, required this.child, this.enabled = true, this.scale = 0.96});
+
+  @override
+  State<Pressable> createState() => _PressableState();
+}
+
+class _PressableState extends State<Pressable> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (!widget.enabled || _down == v) return;
+    setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _set(true),
+      onPointerUp: (_) => _set(false),
+      onPointerCancel: (_) => _set(false),
+      child: AnimatedScale(
+        scale: _down ? widget.scale : 1,
+        duration: Motion.fast,
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Text that cross-fades and slides when its value changes (balances, amounts).
+class AnimatedValueText extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  final TextAlign? textAlign;
+  const AnimatedValueText(this.text, {super.key, required this.style, this.textAlign});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: Motion.medium,
+      switchInCurve: Motion.curve,
+      switchOutCurve: Curves.easeIn,
+      layoutBuilder: (current, previous) => Stack(
+        alignment: Alignment.centerLeft,
+        children: [...previous, if (current != null) current],
+      ),
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: SlideTransition(
+          position: Tween<Offset>(begin: const Offset(0, 0.25), end: Offset.zero).animate(anim),
+          child: child,
+        ),
+      ),
+      child: Text(text, key: ValueKey(text), style: style, textAlign: textAlign),
+    );
+  }
+}
+
 // ------------------------------------------------------------------ buttons
 
 /// Coral pill — the main action on a screen.
@@ -67,7 +134,10 @@ class _PillButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
-    return Opacity(
+    return Pressable(
+      enabled: enabled,
+      child: AnimatedOpacity(
+      duration: Motion.fast,
       opacity: enabled ? 1 : 0.5,
       child: Material(
         color: background,
@@ -99,6 +169,7 @@ class _PillButton extends StatelessWidget {
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -119,7 +190,9 @@ class CircleIconButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: semanticLabel,
-      child: Material(
+      child: Pressable(
+        scale: 0.9,
+        child: Material(
         color: background,
         shape: const CircleBorder(),
         child: InkWell(
@@ -132,10 +205,13 @@ class CircleIconButton extends StatelessWidget {
               alignment: Alignment.center,
               children: [
                 TTIcon(icon, color: TT.ink, size: size * 0.45, strokeWidth: 2.4),
-                if (showDot)
-                  Positioned(
-                    top: size * 0.22,
-                    right: size * 0.24,
+                Positioned(
+                  top: size * 0.22,
+                  right: size * 0.24,
+                  child: AnimatedScale(
+                    scale: showDot ? 1 : 0,
+                    duration: Motion.medium,
+                    curve: Curves.easeOutBack,
                     child: Container(
                       width: 9,
                       height: 9,
@@ -146,10 +222,12 @@ class CircleIconButton extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
               ],
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -282,6 +360,7 @@ class _SoftFieldState extends State<SoftField> {
 }
 
 /// Sliding segmented control on a soft track (Weekly | Monthly, All | Expenses | Deposits).
+/// The teal pill glides to the chosen option.
 class Segmented<T> extends StatelessWidget {
   final List<(T, String)> options;
   final T value;
@@ -290,34 +369,57 @@ class Segmented<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final n = options.length;
+    var index = options.indexWhere((o) => o.$1 == value);
+    if (index < 0) index = 0;
     return Container(
+      height: 54,
       padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(color: TT.track, borderRadius: BorderRadius.circular(18)),
-      child: Row(
+      child: Stack(
         children: [
-          for (var i = 0; i < options.length; i++) ...[
-            if (i > 0) const SizedBox(width: 4),
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onChanged(options[i].$1),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  height: 44,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: options[i].$1 == value ? TT.tealDark : Colors.transparent,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Text(
-                    options[i].$2,
-                    style: TT.body(14, color: options[i].$1 == value ? TT.surface : TT.muted),
-                  ),
+          AnimatedAlign(
+            duration: Motion.medium,
+            curve: Motion.curve,
+            alignment: Alignment(n == 1 ? 0 : -1 + 2 * index / (n - 1), 0),
+            child: FractionallySizedBox(
+              widthFactor: 1 / n,
+              heightFactor: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: TT.tealDark,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [BoxShadow(color: TT.alpha(TT.tealDark, 0.3), blurRadius: 10, offset: const Offset(0, 4))],
                 ),
               ),
             ),
-          ],
+          ),
+          Row(
+            children: [
+              for (var i = 0; i < n; i++)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: i == index,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        if (i != index) HapticFeedback.selectionClick();
+                        onChanged(options[i].$1);
+                      },
+                      child: Center(
+                        child: AnimatedDefaultTextStyle(
+                          duration: Motion.medium,
+                          curve: Motion.curve,
+                          style: TT.body(14, color: i == index ? TT.surface : TT.muted),
+                          child: Text(options[i].$2),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -403,7 +505,10 @@ class SoftCard extends StatelessWidget {
       child: child,
     );
     if (onTap == null) return box;
-    return GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: box);
+    return Pressable(
+      scale: 0.98,
+      child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: box),
+    );
   }
 }
 
@@ -447,18 +552,25 @@ class KidAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = KidPalette.of(kid.colorIndex);
     final initial = kid.name.isEmpty ? '?' : kid.name.characters.first.toUpperCase();
-    return Container(
+    return AnimatedContainer(
+      duration: Motion.medium,
+      curve: Motion.curve,
       width: size,
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(color: p.bg, shape: BoxShape.circle),
-      child: Text(initial, style: TT.display(size * 0.45, color: p.fg)),
+      child: AnimatedDefaultTextStyle(
+        duration: Motion.medium,
+        style: TT.display(size * 0.45, color: p.fg),
+        child: Text(initial),
+      ),
     );
   }
 }
 
 /// Kid switcher: the selected kid shows avatar + name in a teal chip; other kids
-/// collapse to avatars when there are several; "+" adds a kid.
+/// collapse to avatars when there are several; "+" adds a kid. Switching animates
+/// the chip open on the new kid and closed on the old one.
 class KidSwitcher extends StatelessWidget {
   final List<Kid> kids;
   final Kid selected;
@@ -478,79 +590,114 @@ class KidSwitcher extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final compact = kids.length > 1;
-    final children = <Widget>[];
-    for (final k in kids) {
-      final isSel = k.id == selected.id;
-      if (isSel) {
-        children.add(_chip(
-          color: TT.tealDark,
-          avatar: KidAvatar(k, size: compact ? 36 : 40),
-          label: Text(k.name, style: TT.body(compact ? 14 : 15, color: TT.surface)),
-          onTap: () => onSelect(k),
+    final items = <Widget>[
+      for (final k in kids)
+        _KidItem(
+          kid: k,
+          selected: k.id == selected.id,
           compact: compact,
-        ));
-      } else {
-        children.add(GestureDetector(
-          onTap: () => onSelect(k),
-          child: Semantics(button: true, label: 'Switch to ${k.name}', child: KidAvatar(k, size: 44)),
-        ));
-      }
-    }
-    if (compact) {
-      children.add(Semantics(
-        button: true,
-        label: 'Add a kid',
-        child: GestureDetector(
-          onTap: onAdd,
-          child: Container(
-            width: 44,
-            height: 44,
-            alignment: Alignment.center,
-            decoration: const BoxDecoration(color: TT.surface, shape: BoxShape.circle),
-            child: const TTIcon(TTIcons.plus, color: TT.tealDark, size: 20, strokeWidth: 2.8),
-          ),
+          onTap: () {
+            if (k.id != selected.id) HapticFeedback.selectionClick();
+            onSelect(k);
+          },
         ),
-      ));
-    } else {
-      children.add(_chip(
-        color: TT.surface,
-        avatar: Container(
-          width: 40,
-          height: 40,
-          alignment: Alignment.center,
-          decoration: const BoxDecoration(color: TT.track, shape: BoxShape.circle),
-          child: const TTIcon(TTIcons.plus, color: TT.tealDark, size: 20, strokeWidth: 2.8),
-        ),
-        label: Text(addLabel, style: TT.body(15)),
-        onTap: onAdd,
-        compact: false,
-      ));
-    }
+      _AddKidItem(compact: compact, label: addLabel, onTap: onAdd),
+    ];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       clipBehavior: Clip.none,
       child: Row(children: [
-        for (var i = 0; i < children.length; i++) ...[
+        for (var i = 0; i < items.length; i++) ...[
           if (i > 0) SizedBox(width: compact ? 8 : 10),
-          children[i],
+          items[i],
         ]
       ]),
     );
   }
+}
 
-  Widget _chip({
-    required Color color,
-    required Widget avatar,
-    required Widget label,
-    required VoidCallback onTap,
-    required bool compact,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.fromLTRB(compact ? 4 : 6, compact ? 4 : 6, compact ? 14 : 16, compact ? 4 : 6),
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(999)),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [avatar, SizedBox(width: compact ? 8 : 10), label]),
+class _KidItem extends StatelessWidget {
+  final Kid kid;
+  final bool selected;
+  final bool compact;
+  final VoidCallback onTap;
+  const _KidItem({required this.kid, required this.selected, required this.compact, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final pad = compact ? 4.0 : 6.0;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: selected ? kid.name : 'Switch to ${kid.name}',
+      child: Pressable(
+        scale: 0.93,
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: Motion.medium,
+            curve: Motion.curve,
+            padding: selected ? EdgeInsets.fromLTRB(pad, pad, compact ? 14 : 16, pad) : EdgeInsets.zero,
+            decoration: BoxDecoration(
+              color: selected ? TT.tealDark : TT.alpha(TT.tealDark, 0),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              KidAvatar(kid, size: selected ? (compact ? 36 : 40) : 44),
+              AnimatedSize(
+                duration: Motion.medium,
+                curve: Motion.curve,
+                child: selected
+                    ? Padding(
+                        padding: EdgeInsets.only(left: compact ? 8 : 10),
+                        child: Text(kid.name, style: TT.body(compact ? 14 : 15, color: TT.surface)),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AddKidItem extends StatelessWidget {
+  final bool compact;
+  final String label;
+  final VoidCallback onTap;
+  const _AddKidItem({required this.compact, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final plus = Container(
+      width: compact ? 44 : 40,
+      height: compact ? 44 : 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: compact ? TT.surface : TT.track, shape: BoxShape.circle),
+      child: const TTIcon(TTIcons.plus, color: TT.tealDark, size: 20, strokeWidth: 2.8),
+    );
+    return Semantics(
+      button: true,
+      label: 'Add a kid',
+      child: Pressable(
+        scale: 0.93,
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: Motion.medium,
+            curve: Motion.curve,
+            padding: compact ? EdgeInsets.zero : const EdgeInsets.fromLTRB(6, 6, 16, 6),
+            decoration: BoxDecoration(
+              color: compact ? TT.alpha(TT.surface, 0) : TT.surface,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              plus,
+              if (!compact) ...[const SizedBox(width: 10), Text(label, style: TT.body(15))],
+            ]),
+          ),
+        ),
       ),
     );
   }

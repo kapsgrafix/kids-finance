@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../models/models.dart';
 import '../state/format.dart';
+import '../state/app_state.dart';
 import '../state/scope.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
@@ -15,15 +16,15 @@ class CreateJarScreen extends StatefulWidget {
 }
 
 class _CreateJarScreenState extends State<CreateJarScreen> {
-  static const _minPct = 2, _maxPct = 10;
-  int _pct = 5;
+  static const _minPct = AppState.minJarPct;
+  int? _pct;
   int _months = 6;
 
-  void _start(Kid kid) {
+  void _start(Kid kid, int pct) {
     final state = AppScope.read(context);
-    if (state.activeJar(kid) != null) return;
-    state.createJar(kid, percent: _pct, months: _months);
-    showToast(context, 'Jar started! Watch it grow');
+    final jar = state.createJar(kid, percent: pct, months: _months);
+    if (jar == null) return;
+    showToast(context, 'Yay! Your jar is growing');
     Navigator.of(context).pop();
   }
 
@@ -32,8 +33,12 @@ class _CreateJarScreenState extends State<CreateJarScreen> {
     final state = AppScope.of(context);
     final kid = state.selectedKid;
     if (kid == null) return const SizedBox.shrink();
-    final amount = state.jarAmountForPercent(kid, _pct);
+    final maxPct = state.availableJarPercent(kid);
+    final canStart = maxPct >= _minPct;
+    final pct = (_pct ?? 5).clamp(_minPct, maxPct < _minPct ? _minPct : maxPct).toInt();
+    final amount = state.jarAmountForPercent(kid, pct);
     final unit = cycleWord(kid.frequency);
+    final used = state.usedJarPercent(kid);
 
     return Scaffold(
       backgroundColor: TT.bg,
@@ -44,33 +49,45 @@ class _CreateJarScreenState extends State<CreateJarScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(TT.gutter, 16, TT.gutter, 16),
                 children: [
-                  const TopBar('Create a jar'),
+                  const TopBar('Make a jar'),
                   const SizedBox(height: 24),
                   SoftCard(
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
                     child: Column(children: [
-                      Text('Each $unit', style: TT.body(13, color: TT.muted)),
-                      Text(money(amount, kid.currency), style: TT.display(48, height: 1.15)),
-                      Pill('$_pct% of pocket money', background: TT.tealSoft, color: TT.tealDark),
+                      Text('Drop in every $unit', style: TT.body(13, color: TT.muted)),
+                      AnimatedValueText(money(amount, kid.currency), style: TT.display(48, height: 1.15)),
+                      Pill('$pct% of pocket money', background: TT.tealSoft, color: TT.tealDark),
                       const SizedBox(height: 22),
-                      StepSlider(
-                        min: _minPct,
-                        max: _maxPct,
-                        value: _pct,
-                        onChanged: (v) => setState(() => _pct = v),
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(money(state.jarAmountForPercent(kid, _minPct), kid.currency), style: TT.body(12, color: TT.muted)),
-                          Text(money(state.jarAmountForPercent(kid, _maxPct), kid.currency), style: TT.body(12, color: TT.muted)),
-                        ],
-                      ),
+                      if (maxPct > _minPct) ...[
+                        StepSlider(
+                          min: _minPct,
+                          max: maxPct,
+                          value: pct,
+                          onChanged: (v) => setState(() => _pct = v),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(money(state.jarAmountForPercent(kid, _minPct), kid.currency), style: TT.body(12, color: TT.muted)),
+                            Text(money(state.jarAmountForPercent(kid, maxPct), kid.currency), style: TT.body(12, color: TT.muted)),
+                          ],
+                        ),
+                      ],
+                      if (used > 0) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          canStart
+                              ? 'Your other jars use $used%, so this one can take up to $maxPct%.'
+                              : 'Your jars already use the full 10%. Wait for one to pop open!',
+                          textAlign: TextAlign.center,
+                          style: TT.body(12, color: TT.muted),
+                        ),
+                      ],
                     ]),
                   ),
                   const SizedBox(height: 26),
-                  Text('Pick a plan', style: TT.display(18)),
+                  Text('How long should it grow?', style: TT.display(18)),
                   const SizedBox(height: 12),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -95,7 +112,7 @@ class _CreateJarScreenState extends State<CreateJarScreen> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(TT.gutter, 0, TT.gutter, 24),
-              child: PrimaryButton('Start investing', onPressed: amount > 0 ? () => _start(kid) : null),
+              child: PrimaryButton('Start investing', onPressed: canStart && amount > 0 ? () => _start(kid, pct) : null),
             ),
           ],
         ),
@@ -127,10 +144,15 @@ class _PlanCard extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      child: GestureDetector(
-        onTap: onTap,
+      child: Pressable(
+        child: GestureDetector(
+        onTap: () {
+          if (!selected) HapticFeedback.selectionClick();
+          onTap();
+        },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: Motion.medium,
+          curve: Motion.curve,
           padding: const EdgeInsets.fromLTRB(6, 14, 6, 16),
           decoration: BoxDecoration(
             color: selected ? TT.tealDark : TT.surface,
@@ -151,11 +173,13 @@ class _PlanCard extends StatelessWidget {
             Text('You get', style: TT.body(11, color: soft)),
             FittedBox(
               fit: BoxFit.scaleDown,
-              child: Text(money(payback, currency), style: TT.display(28, color: selected ? TT.surface : TT.tealDark, height: 1.15)),
+              child: AnimatedValueText(money(payback, currency),
+                  style: TT.display(28, color: selected ? TT.surface : TT.tealDark, height: 1.15)),
             ),
             Text('+$bonusPct% bonus', style: TT.body(11, color: soft)),
           ]),
         ),
+      ),
       ),
     );
   }
@@ -172,7 +196,7 @@ class StepSlider extends StatelessWidget {
     return LayoutBuilder(builder: (context, c) {
       final w = c.maxWidth;
       const thumb = 28.0;
-      final steps = max - min;
+      final steps = max - min <= 0 ? 1 : max - min;
       double xFor(int v) => (v - min) / steps * (w - thumb) + thumb / 2;
       void update(double dx) {
         final v = ((dx - thumb / 2) / (w - thumb) * steps).round() + min;
@@ -217,16 +241,20 @@ class StepSlider extends StatelessWidget {
                       decoration: const BoxDecoration(color: Color(0xFFB9D5DB), shape: BoxShape.circle),
                     ),
                   ),
-                Positioned(
+                AnimatedPositioned(
+                  duration: Motion.fast,
+                  curve: Curves.easeOut,
                   left: 0,
                   top: 13,
+                  width: x + 6,
                   child: Container(
-                    width: x + 6,
                     height: 10,
                     decoration: BoxDecoration(color: TT.tealDark, borderRadius: BorderRadius.circular(5)),
                   ),
                 ),
-                Positioned(
+                AnimatedPositioned(
+                  duration: Motion.fast,
+                  curve: Curves.easeOut,
                   left: x - thumb / 2,
                   top: 4,
                   child: Container(

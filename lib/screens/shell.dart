@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../state/scope.dart';
 import '../theme/tokens.dart';
+import '../widgets/common.dart';
 import '../widgets/icons.dart';
 import 'history_screen.dart';
 import 'home_screen.dart';
@@ -11,24 +13,39 @@ import 'settings_screen.dart';
 /// The four main tabs behind a soft bottom navigation bar.
 class Shell extends StatefulWidget {
   const Shell({super.key});
+
+  /// Current tab. Other screens can switch tabs, e.g. Home → Jars.
+  static final ValueNotifier<int> tab = ValueNotifier<int>(0);
+  static const home = 0, history = 1, jars = 2, settings = 3;
+
+  static void goTo(BuildContext context, int index) {
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    tab.value = index;
+  }
+
   @override
   State<Shell> createState() => _ShellState();
 }
 
 class _ShellState extends State<Shell> with WidgetsBindingObserver {
-  int _tab = 0;
+  static const _tabs = [HomeScreen(), HistoryScreen(), JarsScreen(), SettingsScreen()];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    Shell.tab.value = Shell.home;
+    Shell.tab.addListener(_onTab);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    Shell.tab.removeListener(_onTab);
     super.dispose();
   }
+
+  void _onTab() => setState(() {});
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
@@ -38,14 +55,42 @@ class _ShellState extends State<Shell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final current = Shell.tab.value;
     return Scaffold(
       backgroundColor: TT.bg,
       extendBody: true,
-      body: IndexedStack(
-        index: _tab,
-        children: const [HomeScreen(), HistoryScreen(), JarsScreen(), SettingsScreen()],
+      body: Stack(
+        children: [
+          for (var i = 0; i < _tabs.length; i++)
+            // Fade-through between tabs; every tab keeps its scroll position and state.
+            Positioned.fill(
+              child: IgnorePointer(
+              ignoring: i != current,
+              child: ExcludeSemantics(
+                excluding: i != current,
+                child: AnimatedOpacity(
+                  opacity: i == current ? 1 : 0,
+                  duration: Motion.medium,
+                  curve: Motion.curve,
+                  child: AnimatedSlide(
+                    offset: i == current ? Offset.zero : const Offset(0, 0.015),
+                    duration: Motion.medium,
+                    curve: Motion.curve,
+                    child: TickerMode(enabled: i == current, child: _tabs[i]),
+                  ),
+                ),
+              ),
+              ),
+            ),
+        ],
       ),
-      bottomNavigationBar: _BottomNav(index: _tab, onTap: (i) => setState(() => _tab = i)),
+      bottomNavigationBar: _BottomNav(
+        index: current,
+        onTap: (i) {
+          if (i != current) HapticFeedback.selectionClick();
+          Shell.tab.value = i;
+        },
+      ),
     );
   }
 }
@@ -66,7 +111,8 @@ class _BottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).padding.bottom;
     return Container(
-      padding: EdgeInsets.fromLTRB(28, 10, 28, 10 + (bottom > 0 ? bottom - 6 : 6)),
+      // White all the way down, behind the Android gesture/buttons bar too.
+      padding: EdgeInsets.fromLTRB(28, 10, 28, 10 + (bottom > 0 ? bottom - 4 : 6)),
       decoration: BoxDecoration(
         color: TT.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
@@ -80,24 +126,37 @@ class _BottomNav extends StatelessWidget {
               button: true,
               selected: i == index,
               label: _items[i].$2,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onTap(i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOut,
-                  padding: EdgeInsets.symmetric(horizontal: i == index ? 14 : 10, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: i == index ? TT.tealSoft : Colors.transparent,
-                    borderRadius: BorderRadius.circular(999),
+              child: Pressable(
+                scale: 0.92,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onTap(i),
+                  child: AnimatedContainer(
+                    duration: Motion.medium,
+                    curve: Motion.curve,
+                    padding: EdgeInsets.symmetric(horizontal: i == index ? 14 : 10, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: i == index ? TT.tealSoft : TT.alpha(TT.tealSoft, 0),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      TweenAnimationBuilder<Color?>(
+                        tween: ColorTween(end: i == index ? TT.tealDark : TT.muted),
+                        duration: Motion.medium,
+                        builder: (_, c, __) => TTIcon(_items[i].$1, color: c ?? TT.muted, size: 22),
+                      ),
+                      AnimatedSize(
+                        duration: Motion.medium,
+                        curve: Motion.curve,
+                        child: i == index
+                            ? Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: Text(_items[i].$2, style: TT.body(13, color: TT.tealDark)),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ]),
                   ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    TTIcon(_items[i].$1, color: i == index ? TT.tealDark : TT.muted, size: 22),
-                    if (i == index) ...[
-                      const SizedBox(width: 6),
-                      Text(_items[i].$2, style: TT.body(13, color: TT.tealDark)),
-                    ],
-                  ]),
                 ),
               ),
             ),

@@ -48,6 +48,11 @@ class Kid {
   /// Jar bonus in percent, keyed by plan length in months (3, 6, 12).
   Map<int, int> jarBonus;
 
+  /// Pocket-money / review day: day of month (1–28) when monthly, weekday (1 = Mon … 7 = Sun) when weekly.
+  int payDay;
+  int reviewHour;
+  int reviewMinute;
+
   /// The next pocket-money day (date only).
   DateTime nextPayDate;
   final DateTime createdAt;
@@ -61,9 +66,17 @@ class Kid {
     required this.currency,
     required this.nextPayDate,
     required this.createdAt,
+    required this.payDay,
+    this.reviewHour = 18,
+    this.reviewMinute = 0,
     this.interestPct = 10,
     Map<int, int>? jarBonus,
   }) : jarBonus = jarBonus ?? {3: 4, 6: 8, 12: 12};
+
+  static int defaultPayDay(Frequency f) => f == Frequency.monthly ? 1 : DateTime.saturday;
+
+  /// When the next pocket-money day (and money chat) happens.
+  DateTime get nextDueAt => DateTime(nextPayDate.year, nextPayDate.month, nextPayDate.day, reviewHour, reviewMinute);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -74,22 +87,31 @@ class Kid {
         'currency': currency,
         'interestPct': interestPct,
         'jarBonus': jarBonus.map((k, v) => MapEntry(k.toString(), v)),
+        'payDay': payDay,
+        'reviewHour': reviewHour,
+        'reviewMinute': reviewMinute,
         'nextPayDate': nextPayDate.toIso8601String(),
         'createdAt': createdAt.toIso8601String(),
       };
 
-  factory Kid.fromJson(Map<String, dynamic> j) => Kid(
+  factory Kid.fromJson(Map<String, dynamic> j) {
+    final frequency = _enumByName(Frequency.values, j['frequency'] as String?, Frequency.monthly);
+    return Kid(
         id: j['id'] as String,
         name: j['name'] as String,
         colorIndex: (j['colorIndex'] as num?)?.toInt() ?? 0,
         pocketMoney: (j['pocketMoney'] as num).toInt(),
-        frequency: _enumByName(Frequency.values, j['frequency'] as String?, Frequency.monthly),
+        frequency: frequency,
         currency: (j['currency'] as String?) ?? 'INR',
+        payDay: (j['payDay'] as num?)?.toInt() ?? defaultPayDay(frequency),
+        reviewHour: (j['reviewHour'] as num?)?.toInt() ?? 18,
+        reviewMinute: (j['reviewMinute'] as num?)?.toInt() ?? 0,
         interestPct: (j['interestPct'] as num?)?.toInt() ?? 10,
         jarBonus: (j['jarBonus'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(int.parse(k), (v as num).toInt())),
         nextPayDate: DateTime.parse(j['nextPayDate'] as String),
         createdAt: DateTime.parse(j['createdAt'] as String),
       );
+  }
 }
 
 class Entry {

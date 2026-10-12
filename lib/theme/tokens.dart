@@ -79,6 +79,10 @@ class TT {
         selectionHandleColor: tealDark,
       ),
       bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.transparent, elevation: 0),
+      pageTransitionsTheme: const PageTransitionsTheme(builders: {
+        TargetPlatform.android: SoftPageTransitionsBuilder(),
+        TargetPlatform.iOS: SoftPageTransitionsBuilder(),
+      }),
     );
   }
 }
@@ -98,4 +102,36 @@ class KidPalette {
   ];
 
   static KidPalette of(int index) => all[index % all.length];
+}
+
+/// Gentle page motion: the new page fades in while sliding up a little.
+class SoftPageTransitionsBuilder extends PageTransitionsBuilder {
+  const SoftPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero).animate(curved),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Standard motion values used across the app.
+class Motion {
+  Motion._();
+  static const fast = Duration(milliseconds: 180);
+  static const medium = Duration(milliseconds: 280);
+  static const slow = Duration(milliseconds: 450);
+  static const curve = Curves.easeOutCubic;
 }

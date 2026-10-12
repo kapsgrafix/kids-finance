@@ -10,6 +10,10 @@ import 'format.dart';
 class AppState extends ChangeNotifier {
   static const _storageKey = 'tiny_treasury_state_v1';
 
+  /// Kids can put 2–10% of their pocket money into jars (all jars together).
+  static const minJarPct = 2;
+  static const maxJarPct = 10;
+
   final List<Kid> kids = [];
   final List<Entry> entries = [];
   final List<Jar> jars = [];
@@ -76,8 +80,17 @@ class AppState extends ChangeNotifier {
   }
 
   void selectKid(String id) {
+    if (_selectedKidId == id) return;
     _selectedKidId = id;
     _commit();
+  }
+
+  int _nextColorIndex() {
+    final used = kids.map((k) => k.colorIndex).toSet();
+    for (var i = 0; i < 5; i++) {
+      if (!used.contains(i)) return i;
+    }
+    return kids.length;
   }
 
   Kid addKid({
@@ -87,30 +100,33 @@ class AppState extends ChangeNotifier {
     required String currency,
   }) {
     final now = DateTime.now();
+    final payDay = Kid.defaultPayDay(frequency);
     final kid = Kid(
       id: _newId(),
       name: name.trim(),
-      colorIndex: kids.length,
+      colorIndex: _nextColorIndex(),
       pocketMoney: pocketMoney,
       frequency: frequency,
       currency: currency,
-      nextPayDate: firstPayDateAfter(now, frequency),
+      payDay: payDay,
+      nextPayDate: firstPayDateAfter(now, frequency, payDay),
       createdAt: now,
     );
     kids.add(kid);
     _selectedKidId = kid.id;
-    // The first pocket money is credited straight away so the kid starts with a balance.
+    // The first pocket money lands straight away so the treasury isn't empty.
     entries.add(Entry(
       id: _newId(),
       kidId: kid.id,
       type: EntryType.deposit,
       amount: pocketMoney,
       depositKind: DepositKind.pocketMoney,
-      note: 'Pocket money',
+      note: 'First pocket money',
       date: now,
     ));
     _notify(kid, NoticeKind.pocketMoney, 'Welcome, ${kid.name}!',
-        '${money(pocketMoney, currency)} pocket money is ready. Next one on ${shortDate(kid.nextPayDate)}.', now);
+        'Your treasury is open! ${money(pocketMoney, currency)} is ready to spend or save. Next pocket money comes on ${shortDate(kid.nextPayDate)}.',
+        now);
     _commit();
     return kid;
   }
@@ -131,8 +147,33 @@ class AppState extends ChangeNotifier {
     if (jarBonus != null) kid.jarBonus = Map.of(jarBonus);
     if (frequency != null && frequency != kid.frequency) {
       kid.frequency = frequency;
-      kid.nextPayDate = firstPayDateAfter(DateTime.now(), frequency);
+      kid.payDay = Kid.defaultPayDay(frequency);
+      kid.nextPayDate = firstPayDateAfter(DateTime.now(), frequency, kid.payDay);
     }
+    _commit();
+  }
+
+  /// Sets the pocket-money / money-chat day and time.
+  void setReviewSchedule(Kid kid, {required int payDay, required int hour, required int minute}) {
+    kid.payDay = payDay;
+    kid.reviewHour = hour;
+    kid.reviewMinute = minute;
+    final now = DateTime.now();
+    final today = dateOnly(now);
+    // Today still counts if the chosen time hasn't passed yet.
+    final todayMatches = kid.frequency == Frequency.monthly ? today.day == payDay : today.weekday == payDay;
+    final todayAt = DateTime(today.year, today.month, today.day, hour, minute);
+    kid.nextPayDate = todayMatches && todayAt.isAfter(now) ? today : firstPayDateAfter(now, kid.frequency, payDay);
+    _commit();
+  }
+
+  /// Deletes a kid with all their money history, jars and notifications.
+  void removeKid(Kid kid) {
+    kids.removeWhere((k) => k.id == kid.id);
+    entries.removeWhere((e) => e.kidId == kid.id);
+    jars.removeWhere((j) => j.kidId == kid.id);
+    notices.removeWhere((n) => n.kidId == kid.id);
+    if (_selectedKidId == kid.id) _selectedKidId = kids.isEmpty ? null : kids.first.id;
     _commit();
   }
 
@@ -170,10 +211,10 @@ class AppState extends ChangeNotifier {
 
   /// Returns an error message, or null on success.
   String? addExpense(Kid kid, int amount, Category category, String note) {
-    if (amount <= 0) return 'Enter an amount';
+    if (amount <= 0) return 'Type how much it cost';
     final balance = balanceOf(kid);
     if (amount > balance) {
-      return '${kid.name} only has ${money(balance < 0 ? 0 : balance, kid.currency)} right now';
+      return 'Whoa! ${kid.name} only has ${money(balance < 0 ? 0 : balance, kid.currency)} in the treasury';
     }
     final now = DateTime.now();
     entries.add(Entry(
@@ -186,15 +227,14 @@ class AppState extends ChangeNotifier {
       date: now,
     ));
     final what = note.trim().isEmpty ? categoryLabel(category).toLowerCase() : note.trim();
-    _notify(kid, NoticeKind.expense, 'New expense',
-        '${kid.name} spent ${money(amount, kid.currency)} on $what.', now,
+    _notify(kid, NoticeKind.expense, 'Spend logged', '${kid.name} spent ${money(amount, kid.currency)} on $what.', now,
         read: true);
     _commit();
     return null;
   }
 
   String? addMoney(Kid kid, int amount, String note) {
-    if (amount <= 0) return 'Enter an amount';
+    if (amount <= 0) return 'Type how much came in';
     final now = DateTime.now();
     entries.add(Entry(
       id: _newId(),
@@ -202,33 +242,42 @@ class AppState extends ChangeNotifier {
       type: EntryType.deposit,
       amount: amount,
       depositKind: DepositKind.gift,
-      note: note.trim().isEmpty ? 'Money added' : note.trim(),
+      note: note.trim().isEmpty ? 'Money in' : note.trim(),
       date: now,
     ));
-    _notify(kid, NoticeKind.deposit, 'Money added',
-        '${money(amount, kid.currency)} added to ${kid.name}\'s treasury.', now,
+    _notify(kid, NoticeKind.deposit, 'Ka-ching!',
+        '${money(amount, kid.currency)} landed in ${kid.name}\'s treasury.', now,
         read: true);
     _commit();
     return null;
   }
 
   /// Pocket money after this cycle's jar contributions.
-  int nextPocketMoney(Kid kid) => kid.pocketMoney - jarContributionPerCycle(kid);
+  int nextPocketMoney(Kid kid) {
+    final v = kid.pocketMoney - jarContributionPerCycle(kid);
+    return v < 0 ? 0 : v;
+  }
 
   int jarContributionPerCycle(Kid kid) =>
-      jars.where((j) => j.kidId == kid.id && j.isActive && j.cyclesPaid < j.totalCycles).fold(0, (s, j) => s + j.amountPerCycle);
+      activeJars(kid).where((j) => j.cyclesPaid < j.totalCycles).fold(0, (s, j) => s + j.amountPerCycle);
 
   // ---------------------------------------------------------------- jars
 
-  Jar? activeJar(Kid kid) {
-    for (final j in jars) {
-      if (j.kidId == kid.id && j.isActive) return j;
-    }
-    return null;
-  }
+  List<Jar> activeJars(Kid kid) =>
+      jars.where((j) => j.kidId == kid.id && j.isActive).toList()..sort((a, b) => a.startDate.compareTo(b.startDate));
 
   List<Jar> pastJars(Kid kid) =>
       jars.where((j) => j.kidId == kid.id && !j.isActive).toList()..sort((a, b) => b.startDate.compareTo(a.startDate));
+
+  bool hasAnyJar(Kid kid) => jars.any((j) => j.kidId == kid.id);
+
+  /// Percent of pocket money already going into active jars.
+  int usedJarPercent(Kid kid) => activeJars(kid).fold(0, (s, j) => s + j.percent);
+
+  /// The most a new jar can take, keeping all jars within 10%. Below 2 means no room.
+  int availableJarPercent(Kid kid) => maxJarPct - usedJarPercent(kid);
+
+  bool canStartJar(Kid kid) => availableJarPercent(kid) >= minJarPct;
 
   int jarAmountForPercent(Kid kid, int pct) => (kid.pocketMoney * pct / 100).round();
 
@@ -237,12 +286,13 @@ class AppState extends ChangeNotifier {
     final cycles = cyclesForMonths(months, kid.frequency);
     var d = kid.nextPayDate;
     for (var i = 1; i < cycles; i++) {
-      d = nextCycle(d, kid.frequency);
+      d = nextCycle(d, kid.frequency, kid.payDay);
     }
     return d;
   }
 
-  Jar createJar(Kid kid, {required int percent, required int months}) {
+  Jar? createJar(Kid kid, {required int percent, required int months}) {
+    if (percent < minJarPct || percent > availableJarPercent(kid)) return null;
     final now = DateTime.now();
     final jar = Jar(
       id: _newId(),
@@ -256,8 +306,8 @@ class AppState extends ChangeNotifier {
       opensOn: jarOpensOn(kid, months),
     );
     jars.add(jar);
-    _notify(kid, NoticeKind.jarProgress, 'New jar started',
-        '${kid.name} will put ${money(jar.amountPerCycle, kid.currency)} in every ${cycleWord(kid.frequency)} and get back ${money(jar.payout, kid.currency)}.',
+    _notify(kid, NoticeKind.jarProgress, 'A new jar is growing!',
+        '${kid.name} will drop ${money(jar.amountPerCycle, kid.currency)} in every ${cycleWord(kid.frequency)} and get back ${money(jar.payout, kid.currency)}.',
         now,
         read: true);
     _commit();
@@ -278,12 +328,12 @@ class AppState extends ChangeNotifier {
         type: EntryType.deposit,
         amount: jar.saved,
         depositKind: DepositKind.jarSettled,
-        note: 'Jar settled',
+        note: 'Jar opened early',
         date: now,
       ));
     }
-    _notify(kid, NoticeKind.jarSettled, 'Jar settled',
-        '${money(jar.saved, kid.currency)} from ${kid.name}\'s ${jar.months}-month jar went back to the balance.', now,
+    _notify(kid, NoticeKind.jarSettled, 'Jar opened early',
+        '${money(jar.saved, kid.currency)} went back to ${kid.name}\'s treasury. No bonus this time!', now,
         read: true);
     _commit();
   }
@@ -293,14 +343,13 @@ class AppState extends ChangeNotifier {
   /// Runs every pocket-money day that has come due: interest on leftover money,
   /// jar contributions, the new pocket money, and jar payouts.
   void processDueCycles(DateTime now, {bool save = true}) {
-    final today = dateOnly(now);
     var changed = false;
     for (final kid in kids) {
       var guard = 0;
-      while (!kid.nextPayDate.isAfter(today) && guard < 120) {
+      while (!kid.nextDueAt.isAfter(now) && guard < 120) {
         guard++;
         changed = true;
-        final payDay = kid.nextPayDate.add(const Duration(hours: 9));
+        final payDay = kid.nextDueAt;
 
         // 1. Interest on money left over from the last cycle.
         final leftover = balanceOf(kid);
@@ -309,7 +358,7 @@ class AppState extends ChangeNotifier {
         // 2. Jar contributions.
         var contributed = 0;
         final opened = <Jar>[];
-        for (final jar in jars.where((j) => j.kidId == kid.id && j.isActive).toList()) {
+        for (final jar in activeJars(kid)) {
           if (jar.cyclesPaid >= jar.totalCycles) continue;
           jar.cyclesPaid++;
           jar.saved += jar.amountPerCycle;
@@ -336,20 +385,21 @@ class AppState extends ChangeNotifier {
             type: EntryType.deposit,
             amount: interest,
             depositKind: DepositKind.interest,
-            note: 'Interest earned',
+            note: 'Saving bonus',
             date: payDay.add(const Duration(minutes: 1)),
           ));
         }
 
-        final jarText = contributed > 0 ? ' ${money(contributed, kid.currency)} went into the jar.' : '';
+        final jarText = contributed > 0 ? ' ${money(contributed, kid.currency)} hopped into the jar.' : '';
         _notify(kid, NoticeKind.pocketMoney, 'Pocket money day!',
-            '${money(pocket, kid.currency)} is ready for ${kid.name}.$jarText', payDay);
+            'Ka-ching! ${money(pocket, kid.currency)} landed for ${kid.name}.$jarText', payDay);
         if (interest > 0) {
-          _notify(kid, NoticeKind.interest, 'Interest earned',
-              '${kid.name} saved ${money(leftover, kid.currency)} and earned ${money(interest, kid.currency)} interest.', payDay);
+          _notify(kid, NoticeKind.interest, 'Your savings grew!',
+              '${kid.name} kept ${money(leftover, kid.currency)} and earned ${money(interest, kid.currency)} extra. Nice saving!',
+              payDay);
         }
-        _notify(kid, NoticeKind.review, 'Time to review',
-            'Sit down with ${kid.name} to update the spends from this ${cycleWord(kid.frequency)}.', payDay);
+        _notify(kid, NoticeKind.review, 'Money chat time',
+            'Sit with ${kid.name} and catch up on this ${cycleWord(kid.frequency)}\'s spends.', payDay);
 
         // 4. Jars that just opened pay out with their bonus.
         for (final jar in opened) {
@@ -362,14 +412,14 @@ class AppState extends ChangeNotifier {
             type: EntryType.deposit,
             amount: payout,
             depositKind: DepositKind.jarPayout,
-            note: '${jar.months}-month jar opened',
+            note: '${jar.months}-month jar popped open',
             date: payDay.add(const Duration(minutes: 2)),
           ));
-          _notify(kid, NoticeKind.jarOpened, 'Jar opened!',
-              '${kid.name}\'s ${jar.months}-month jar paid out ${money(payout, kid.currency)}, bonus included.', payDay);
+          _notify(kid, NoticeKind.jarOpened, 'Jar popped open!',
+              '${kid.name}\'s ${jar.months}-month jar paid out ${money(payout, kid.currency)}, bonus included. Woohoo!', payDay);
         }
 
-        kid.nextPayDate = nextCycle(kid.nextPayDate, kid.frequency);
+        kid.nextPayDate = nextCycle(kid.nextPayDate, kid.frequency, kid.payDay);
       }
     }
     if (changed) {

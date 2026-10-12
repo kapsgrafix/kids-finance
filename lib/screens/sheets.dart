@@ -74,7 +74,7 @@ Future<void> showAddEntrySheet(BuildContext context, {required bool expense}) as
   if (kid == null) return;
   final result = await showTTSheet<String>(
     context,
-    title: expense ? 'Add expense' : 'Add money',
+    title: expense ? 'What did you buy?' : 'Money coming in!',
     builder: (_) => _AddEntryForm(kid: kid, expense: expense),
   );
   if (result != null && context.mounted) showToast(context, result);
@@ -121,7 +121,12 @@ class _AddEntryFormState extends State<_AddEntryForm> {
       return;
     }
     final amt = money(_value, kid.currency);
-    Navigator.of(context).pop(widget.expense ? '$amt expense added' : '$amt added to ${kid.name}\'s treasury');
+    final cheer = switch (_category) {
+      Category.food => 'Yum!',
+      Category.travel => 'Vroom!',
+      Category.fun => 'Woohoo!',
+    };
+    Navigator.of(context).pop(widget.expense ? '$cheer $amt spend saved' : 'Ka-ching! $amt added to ${kid.name}\'s treasure');
   }
 
   @override
@@ -168,7 +173,7 @@ class _AddEntryFormState extends State<_AddEntryForm> {
               ),
               const SizedBox(height: 2),
               Text(
-                _error ?? 'Balance after this: ${money(after, kid.currency)}',
+                _error ?? (widget.expense ? 'Left after this: ${money(after, kid.currency)}' : 'Treasure after this: ${money(after, kid.currency)}'),
                 style: TT.body(12, color: _error != null || after < 0 ? TT.coralStrong : TT.muted),
               ),
             ],
@@ -190,7 +195,7 @@ class _AddEntryFormState extends State<_AddEntryForm> {
         const SizedBox(height: 14),
         SoftField(
           controller: _note,
-          hint: widget.expense ? 'Add a note (optional)' : 'Where is it from? (optional)',
+          hint: widget.expense ? 'What was it? Ice cream, comics…' : 'Who gave it? Nani, birthday…',
           fill: TT.bg,
           shadow: false,
           maxLength: 40,
@@ -215,10 +220,16 @@ class _CategoryChip extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      child: GestureDetector(
-        onTap: onTap,
+      child: Pressable(
+        scale: 0.94,
+        child: GestureDetector(
+        onTap: () {
+          if (!selected) HapticFeedback.selectionClick();
+          onTap();
+        },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
+          duration: Motion.medium,
+          curve: Motion.curve,
           height: 48,
           decoration: BoxDecoration(
             color: selected ? TT.tealDark : s.tint,
@@ -227,12 +238,23 @@ class _CategoryChip extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              TTIcon(s.icon, color: selected ? TT.surface : s.color, size: 20),
+              TweenAnimationBuilder<Color?>(
+                tween: ColorTween(end: selected ? TT.surface : s.color),
+                duration: Motion.medium,
+                builder: (_, c, __) => TTIcon(s.icon, color: c ?? s.color, size: 20),
+              ),
               const SizedBox(width: 6),
-              Flexible(child: Text(s.label, style: TT.body(15, color: selected ? TT.surface : TT.ink))),
+              Flexible(
+                child: AnimatedDefaultTextStyle(
+                  duration: Motion.medium,
+                  style: TT.body(15, color: selected ? TT.surface : TT.ink),
+                  child: Text(s.label),
+                ),
+              ),
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -431,7 +453,7 @@ class _JarBonusBodyState extends State<_JarBonusBody> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Longer plans should pay more, so waiting feels worth it.', style: TT.body(13, color: TT.muted)),
+        Text('Longer jars should pay more, so waiting feels worth it.', style: TT.body(13, color: TT.muted)),
         const SizedBox(height: 14),
         for (final m in const [3, 6, 12]) ...[
           NumberStepper(
@@ -449,3 +471,124 @@ class _JarBonusBodyState extends State<_JarBonusBody> {
   }
 }
 
+
+// ------------------------------------------------------------------ review schedule
+
+/// Day + time for the pocket-money day and money chat. Returns (payDay, hour, minute).
+Future<(int, int, int)?> showReviewScheduleSheet(BuildContext context, Kid kid) {
+  return showTTSheet<(int, int, int)>(
+    context,
+    title: 'Money chat time',
+    builder: (_) => _ReviewScheduleBody(kid: kid),
+  );
+}
+
+class _ReviewScheduleBody extends StatefulWidget {
+  final Kid kid;
+  const _ReviewScheduleBody({required this.kid});
+  @override
+  State<_ReviewScheduleBody> createState() => _ReviewScheduleBodyState();
+}
+
+class _ReviewScheduleBodyState extends State<_ReviewScheduleBody> {
+  late int _day = widget.kid.payDay;
+  late TimeOfDay _time = TimeOfDay(hour: widget.kid.reviewHour, minute: widget.kid.reviewMinute);
+
+  bool get _monthly => widget.kid.frequency == Frequency.monthly;
+
+  Future<void> _pickTime() async {
+    final t = await showTimePicker(
+      context: context,
+      initialTime: _time,
+      helpText: 'Pick a time',
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: Theme.of(ctx).colorScheme.copyWith(primary: TT.tealDark, onPrimary: TT.surface, surface: TT.surface),
+        ),
+        child: child!,
+      ),
+    );
+    if (t != null) setState(() => _time = t);
+  }
+
+  Widget _dayChip(int value, String label, {double size = 38}) {
+    final sel = value == _day;
+    return Pressable(
+      scale: 0.9,
+      child: GestureDetector(
+        onTap: () {
+          if (!sel) HapticFeedback.selectionClick();
+          setState(() => _day = value);
+        },
+        child: AnimatedContainer(
+          duration: Motion.medium,
+          curve: Motion.curve,
+          width: size,
+          height: 38,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: sel ? TT.tealDark : TT.bg,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(label, style: TT.body(13, color: sel ? TT.surface : TT.ink)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Pocket money lands and you catch up on ${widget.kid.name}\'s spends together.',
+          style: TT.body(13, color: TT.muted, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        Text(_monthly ? 'Which day of the month?' : 'Which day of the week?', style: TT.body(14)),
+        const SizedBox(height: 10),
+        if (_monthly)
+          LayoutBuilder(builder: (context, c) {
+            final size = (c.maxWidth - 6 * 6) / 7;
+            return Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [for (var d = 1; d <= 28; d++) _dayChip(d, '$d', size: size)],
+            );
+          })
+        else
+          Row(children: [
+            for (var i = 1; i <= 7; i++) ...[
+              if (i > 1) const SizedBox(width: 6),
+              Expanded(child: _dayChip(i, weekdays[i - 1], size: double.infinity)),
+            ],
+          ]),
+        const SizedBox(height: 18),
+        Text('What time?', style: TT.body(14)),
+        const SizedBox(height: 10),
+        Pressable(
+          scale: 0.98,
+          child: GestureDetector(
+            onTap: _pickTime,
+            child: Container(
+              height: 54,
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              decoration: BoxDecoration(color: TT.bg, borderRadius: BorderRadius.circular(TT.rField)),
+              child: Row(children: [
+                const TTIcon(TTIcons.calendar, color: TT.tealDark, size: 18),
+                const SizedBox(width: 10),
+                Expanded(child: Text(clock(_time.hour, _time.minute), style: TT.body(16))),
+                const TTIcon(TTIcons.chevronDown, color: TT.ink, size: 18, strokeWidth: 2.6),
+              ]),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        PrimaryButton('Save', onPressed: () => Navigator.of(context).pop((_day, _time.hour, _time.minute))),
+      ],
+    );
+  }
+}
