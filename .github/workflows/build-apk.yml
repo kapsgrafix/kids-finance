@@ -1,0 +1,61 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # The repo holds lib/, assets/ and pubspec.yaml. Generate the Android
+      # platform folder on the fly if it hasn't been committed yet.
+      - name: Generate Android project (if missing)
+        run: |
+          if [ ! -d android ]; then
+            flutter create . --project-name tiny_treasury --org com.binnytechlabs --platforms android
+            rm -f test/widget_test.dart
+          fi
+
+      - name: Set app name to "Tiny Treasury"
+        run: |
+          sed -i 's/android:label="[^"]*"/android:label="Tiny Treasury"/' android/app/src/main/AndroidManifest.xml
+          grep -o 'android:label="[^"]*"' android/app/src/main/AndroidManifest.xml
+
+      - name: Install packages
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny-treasury-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
